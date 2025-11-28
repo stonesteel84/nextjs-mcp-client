@@ -8,6 +8,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Send, Bot, User } from 'lucide-react';
 import { AvatarImage } from '@/components/ui/avatar';
+import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 
 interface Message {
   id: string;
@@ -83,15 +84,6 @@ export default function Home() {
       return;
     }
 
-    setMessages((prev) => [...prev, userMessage]);
-    setInput('');
-    setIsLoading(true);
-    
-    // 포커스를 입력창으로 유지
-    setTimeout(() => {
-      inputRef.current?.focus();
-    }, 0);
-
     // 이전 요청 취소
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -100,15 +92,32 @@ export default function Home() {
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
 
-    const assistantMessage: Message = {
-      id: (Date.now() + 1).toString(),
-      role: 'assistant',
-      content: '',
-    };
-
-    setMessages((prev) => [...prev, assistantMessage]);
+    // 메시지 상태 업데이트를 한 번에 처리
+    setMessages((prev) => {
+      const updatedMessages = [...prev, userMessage];
+      const assistantMessage: Message = {
+        id: `${Date.now()}-assistant`,
+        role: 'assistant',
+        content: '',
+      };
+      return [...updatedMessages, assistantMessage];
+    });
+    
+    setInput('');
+    setIsLoading(true);
+    
+    // 포커스를 입력창으로 유지
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 0);
 
     try {
+      // 최신 메시지 상태를 사용하여 히스토리 구성
+      const currentHistory = messages.map((m) => ({
+        role: m.role,
+        parts: [{ text: m.content }],
+      }));
+      
       // API Route로 요청 전송
       const response = await fetch('/api/chat', {
         method: 'POST',
@@ -117,10 +126,7 @@ export default function Home() {
         },
         body: JSON.stringify({
           message: userMessage.content,
-          history: messages.map((m) => ({
-            role: m.role,
-            parts: [{ text: m.content }],
-          })),
+          history: currentHistory,
         }),
         signal: abortController.signal,
       });
@@ -156,10 +162,14 @@ export default function Home() {
               const parsed = JSON.parse(data);
               if (parsed.text) {
                 setMessages((prev) => {
+                  // 불변성 유지하며 마지막 assistant 메시지 업데이트
                   const updated = [...prev];
-                  const lastMessage = updated[updated.length - 1];
-                  if (lastMessage && lastMessage.role === 'assistant') {
-                    lastMessage.content += parsed.text;
+                  const lastIndex = updated.length - 1;
+                  if (lastIndex >= 0 && updated[lastIndex].role === 'assistant') {
+                    updated[lastIndex] = {
+                      ...updated[lastIndex],
+                      content: updated[lastIndex].content + parsed.text,
+                    };
                   }
                   return updated;
                 });
@@ -178,14 +188,18 @@ export default function Home() {
       console.error('Chat error:', error);
       const errorMessage = error.message || '오류가 발생했습니다. 다시 시도해주세요.';
       setMessages((prev) => {
+        // 불변성 유지하며 에러 메시지 업데이트
         const updated = [...prev];
-        const lastMessage = updated[updated.length - 1];
-        if (lastMessage && lastMessage.role === 'assistant') {
-          lastMessage.content = errorMessage;
+        const lastIndex = updated.length - 1;
+        if (lastIndex >= 0 && updated[lastIndex].role === 'assistant') {
+          updated[lastIndex] = {
+            ...updated[lastIndex],
+            content: errorMessage,
+          };
         } else {
           // assistant 메시지가 없으면 추가
           updated.push({
-            id: Date.now().toString(),
+            id: `${Date.now()}-error`,
             role: 'assistant',
             content: errorMessage,
           });
@@ -292,9 +306,15 @@ export default function Home() {
                       : 'bg-muted border-l-4 border-blue-500'
                   }`}
                 >
-                  <p className="whitespace-pre-wrap break-words leading-relaxed">
-                    {message.content || '...'}
-                  </p>
+                  {message.role === 'assistant' ? (
+                    <MarkdownRenderer 
+                      content={message.content || '...'} 
+                    />
+                  ) : (
+                    <p className="whitespace-pre-wrap break-words leading-relaxed">
+                      {message.content || '...'}
+                    </p>
+                  )}
                 </Card>
                 {message.role === 'user' && (
                   <Avatar className="h-10 w-10 ring-2 ring-orange-500/20">
@@ -324,7 +344,7 @@ export default function Home() {
                   🤖
                 </AvatarFallback>
               </Avatar>
-              <Card className="max-w-[80%] px-4 py-2 bg-muted">
+              <Card className="max-w-[80%] px-4 py-2 bg-muted border-l-4 border-blue-500">
                 <div className="flex items-center gap-2">
                   <span className="text-muted-foreground">입력 중</span>
                   <span className="animate-bounce">💭</span>
