@@ -1,0 +1,19 @@
+{
+  "name": "docker-hub-mcp-server",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "MCP server for Docker Hub API",
+  "main": "server.ts",
+  "scripts": {
+    "start": "tsx server.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "tsx": "^4.7.0",
+    "typescript": "^5"
+  }
+}
+
