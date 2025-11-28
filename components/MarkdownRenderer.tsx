@@ -12,10 +12,54 @@ import { cn } from '@/lib/utils';
 interface MarkdownRendererProps {
   content: string;
   className?: string;
+  imageUrl?: string; // 이미 업로드된 이미지 URL이 있으면 base64 이미지 제거
 }
 
-export function MarkdownRenderer({ content, className }: MarkdownRendererProps) {
+/**
+ * base64 이미지 데이터를 마크다운 이미지로 변환
+ * MCP 도구 응답에서 raw base64 이미지를 감지하여 변환
+ */
+function processContentForBase64Images(content: string): string {
+  // data:image URL을 마크다운 이미지로 변환 (이미 마크다운 형식이 아닌 경우)
+  // 예: data:image/png;base64,... -> ![Generated Image](data:image/png;base64,...)
+  const base64ImagePattern = /(?<![!\[.*\]\())(data:image\/[a-zA-Z]+;base64,[A-Za-z0-9+/=]+)/g;
+  let processed = content.replace(base64ImagePattern, (match) => {
+    return `\n\n![Generated Image](${match})\n\n`;
+  });
+  
+  // JSON 형식의 MCP 이미지 응답 처리
+  // 예: {"type":"image","data":"base64...","mimeType":"image/png"}
+  const jsonImagePattern = /\{"type"\s*:\s*"image"\s*,\s*"data"\s*:\s*"([^"]+)"\s*,\s*"mimeType"\s*:\s*"([^"]+)"\s*\}/g;
+  processed = processed.replace(jsonImagePattern, (_, data, mimeType) => {
+    return `\n\n![Generated Image](data:${mimeType};base64,${data})\n\n`;
+  });
+  
+  // 역순 JSON 형식도 처리
+  const jsonImagePattern2 = /\{"mimeType"\s*:\s*"([^"]+)"\s*,\s*"type"\s*:\s*"image"\s*,\s*"data"\s*:\s*"([^"]+)"\s*\}/g;
+  processed = processed.replace(jsonImagePattern2, (_, mimeType, data) => {
+    return `\n\n![Generated Image](data:${mimeType};base64,${data})\n\n`;
+  });
+
+  return processed;
+}
+
+export function MarkdownRenderer({ content, className, imageUrl }: MarkdownRendererProps) {
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  
+  // 이미 업로드된 이미지 URL이 있으면 base64 이미지를 제거
+  let processedContent = content;
+  if (imageUrl) {
+    // base64 이미지 패턴 제거 (마크다운 이미지 태그 포함)
+    processedContent = processedContent.replace(/!\[[^\]]*\]\(data:image\/[^)]+\)/g, '');
+    processedContent = processedContent.replace(/!\[Generated Image\]\(data:image\/[^)]+\)/g, '');
+    processedContent = processedContent.replace(/data:image\/[a-zA-Z]+;base64,[A-Za-z0-9+/=]+/g, '');
+    // 빈 이미지 태그 제거
+    processedContent = processedContent.replace(/!\[[^\]]*\]\(\)/g, '');
+    processedContent = processedContent.replace(/!\[[^\]]*\]\(""\)/g, '');
+  } else {
+    // base64 이미지를 마크다운으로 변환
+    processedContent = processContentForBase64Images(processedContent);
+  }
 
   const copyToClipboard = async (code: string, id: string) => {
     try {
@@ -152,11 +196,35 @@ export function MarkdownRenderer({ content, className }: MarkdownRendererProps) 
           hr: ({ node, ...props }) => (
             <hr className="my-6 border-gray-300 dark:border-gray-700" {...props} />
           ),
+          img: ({ node, src, alt, ...props }) => {
+            // base64 이미지 또는 일반 URL 이미지 렌더링
+            const srcStr = typeof src === 'string' ? src : '';
+            
+            // src가 비어있거나 유효하지 않으면 렌더링하지 않음
+            if (!srcStr || srcStr.trim() === '') {
+              return null;
+            }
+            
+            const isBase64 = srcStr.startsWith('data:image/');
+            return (
+              <img
+                src={srcStr}
+                alt={alt || 'image'}
+                className={cn(
+                  'max-w-full h-auto rounded-lg my-4',
+                  isBase64 ? 'shadow-lg border border-gray-200 dark:border-gray-700' : ''
+                )}
+                loading="lazy"
+                {...props}
+              />
+            );
+          },
         }}
       >
-        {content}
+        {processedContent}
       </ReactMarkdown>
     </div>
   );
 }
+
 
